@@ -12,6 +12,7 @@ I created a local phishing tool to help users and professionals to determine whe
 - **Local Heuristic Scanners:** Flags high-risk file extensions and anomalous sender domains.
 - **Client-Side SHA-256 Hashing:** Computes file hashes locally in browser memory instantly.
 - **Display whether email is safe or not:** After analyzing it will tell if it's safe or not.
+- **Windows emojis:** I use Windows emojis to make the tool appealing.  
 - **Google DoH:** Performs real-time DNS checks to detect invalid or suspicious domains.
 - **Email Header Parsing:** Detects forwarded emails and extracts the original sender.
 - **Phishing Keyword Detection:** Scans email content for common phishing keywords.
