@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GoPhish Scanner & Attachment Sandbox</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #1e1e1e; color: #fff; }
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .panel { flex: 1; min-width: 400px; background: #252526; padding: 20px; border: 1px solid #333; border-radius: 6px; }
+        textarea { width: 100%; height: 120px; background: #2d2d2d; color: #fff; border: 1px solid #444; padding: 10px; margin-top: 10px; box-sizing: border-box; }
+        button { padding: 10px 20px; background: #007acc; color: white; border: none; cursor: pointer; margin-top: 10px; }
+        .results { margin-top: 15px; padding: 12px; background: #1e1e1e; border: 1px solid #444; min-height: 80px; font-family: monospace; font-size: 13px; }
+        
+        /* Drag and Drop Zone Styling */
+        .drop-zone {
+            border: 2px dashed #007acc;
+            padding: 30px;
+            text-align: center;
+            background: #2d2d2d;
+            cursor: pointer;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .drop-zone:hover { background: #333; }
+    </style>
+</head>
+<body>
+    <h1>GoPhish Security Suite</h1>
+    <p>Local email heuristic analysis & isolated VirusTotal attachment verification.</p>
+    
+    <div class="container">
+        <!-- PANEL 1: Email Text/Header Local Scanner -->
+        <div class="panel">
+            <h2>📧 Email Text & Header Scanner</h2>
+            <input type="file" id="emailFileInput" accept=".eml,.txt" onchange="handleFileUpload(event)" style="margin-bottom: 10px; display: block;" />
+            <textarea id="emailInput" placeholder="Paste raw email headers/text here..."></textarea>
+            <br>
+            <button onclick="runScan()">Scan Email Text</button>
+            <button onclick="loadSampleEmail()" style="background: #444; margin-left: 10px;">Load Sample</button>
+            <button onclick="clearEmailForm()" style="background: #882222; margin-left: 10px;">Clear</button>
+            
+            <div id="emailResults" class="results">Results will appear here...</div>
+        </div>
+
+        <!-- PANEL 2: Dedicated VirusTotal Attachment Drop Zone -->
+        <div class="panel">
+            <h2>📎 Attachment Sandbox (VirusTotal)</h2>
+            <p style="font-size: 13px; color: #aaa;">Drop any suspicious email attachment below to check its SHA-256 hash against VirusTotal.</p>
+            
+            <div class="drop-zone" id="dropZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)" onclick="document.getElementById('fileInput').click()">
+                <p>Drag & Drop attachment here<br><strong>or click to browse files</strong></p>
+                <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(event)" />
+            </div>
+
+            <div id="attachmentResults" class="results" style="margin-top: 15px;">Attachment analysis results will appear here...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- PANEL 1 LOGIC: Email Local Scanner ---
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('emailInput').value = e.target.result;
+                runScan();
+            };
+            reader.readAsText(file);
+        }
+
+        function loadSampleEmail() {
+            const sampleText = `Received: from mail.suspicious-relay-77.ru (HELO mail)
+From: security-alert@microsoft-support-update.com
+To: target@company.com
+Subject: URGENT: Verify Your Corporate Credentials Immediately
+
+Dear User,
+Your Microsoft 365 session has expired. You must verify your account within 24 hours.
+Click here to login:
+http://login.microsoft365-verify-secure-portal.com/auth/login`;
+
+            document.getElementById('emailInput').value = sampleText;
+            runScan();
+        }
+
+        function escapeHtml(string) {
+            return string.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        function clearEmailForm() {
+            document.getElementById('emailInput').value = '';
+            document.getElementById('emailFileInput').value = '';
+            document.getElementById('emailResults').innerHTML = 'Results will appear here...';
+        }
+
+        function runScan() {
+            const text = document.getElementById('emailInput').value;
+            const resultsDiv = document.getElementById('emailResults');
+            
+            let warnings = [];
+            let isSuspicious = false;
+            let targetSender = "Unknown Sender";
+
+            const fwdHeaderIndex = text.indexOf("---------- Forwarded message ---------");
+            if (fwdHeaderIndex !== -1) {
+                const fwdSection = text.substring(fwdHeaderIndex);
+                const innerFromMatch = fwdSection.match(/From:\s*([^\r\n]+)/i);
+                if (innerFromMatch) {
+                    targetSender = innerFromMatch[1].replace(/[\r\n]+/g, '').trim();
+                }
+                warnings.push("ℹ️ Forwarded email wrapper detected. Inspecting inner payload.");
+            } else {
+                const fromMatch = text.match(/From:\s*([^\r\n]+)/i);
+                targetSender = fromMatch ? fromMatch[1].replace(/[\r\n]+/g, '').trim() : "Unknown Sender";
+            }
+
+            const lowerText = text.toLowerCase();
+            const highRiskKeywords = ['verify', 'account', 'suspend', 'expired', 'click here', 'login', 'update', 'security alert', 'action required', 'billing'];
+            
+            let keywordHits = highRiskKeywords.filter(keyword => lowerText.includes(keyword));
+            if (keywordHits.length >= 2) {
+                isSuspicious = true;
+                warnings.push(`⚠️ High-risk trigger words detected: ${keywordHits.join(', ')}`);
+            }
+
+            const emailMatch = targetSender.match(/<([^>]+)>|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+            const cleanEmail = emailMatch ? (emailMatch[1] || emailMatch[2] || targetSender) : targetSender;
+            const domainPart = cleanEmail.includes('@') ? cleanEmail.split('@')[1].toLowerCase().replace('>', '').trim() : '';
+
+            if (domainPart) {
+                const trustedDomains = ['libertymutual.com', 'microsoft.com', 'google.com'];
+                if (!trustedDomains.includes(domainPart)) {
+                    if (domainPart.length > 8 && /^[a-z0-9]+$/.test(domainPart.split('.')[0])) {
+                        isSuspicious = true;
+                        warnings.push(`🚨 Suspicious high-entropy domain detected: ${domainPart}`);
+                    }
+                } else {
+                    warnings.push(`✅ Trusted domain whitelist match: ${domainPart}`);
+                }
+            }
+
+            resultsDiv.innerHTML = `
+                <p><strong>Detected Sender:</strong> ${escapeHtml(targetSender)}</p>
+                <p><strong>Initial Assessment:</strong> ${isSuspicious ? '<span style="color: #ff5555;">Suspicious</span>' : '<span style="color: #55ff55;">Likely Clean</span>'}</p>
+                <p><strong>Warnings:</strong></p>
+                <ul>${warnings.length > 0 ? warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('') : '<li>None</li>'}</ul>
+            `;
+        }
+
+        // --- PANEL 2 LOGIC: VirusTotal Attachment Drag & Drop Sandbox ---
+        function handleDragOver(event) {
+            event.preventDefault();
+            document.getElementById('dropZone').style.borderColor = '#55ff55';
+        }
+
+        function handleDragLeave(event) {
+            event.preventDefault();
+            document.getElementById('dropZone').style.borderColor = '#007acc';
+        }
+
+        function handleFileDrop(event) {
+            event.preventDefault();
+            document.getElementById('dropZone').style.borderColor = '#007acc';
+            if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+                processAttachment(event.dataTransfer.files[0]);
+            }
+        }
+
+        function handleFileSelect(event) {
+            if (event.target.files && event.target.files.length > 0) {
+                processAttachment(event.target.files[0]);
+            }
+        }
+
+        async function processAttachment(file) {
+            const resultsDiv = document.getElementById('attachmentResults');
+            resultsDiv.innerHTML = `📂 Processing file: <strong>${escapeHtml(file.name)}</strong>...`;
+
+            try {
+                // 1. Read file buffer to calculate SHA-256 locally
+                const arrayBuffer = await file.arrayBuffer();
+                const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                // 2. Local heuristic check for high-risk extensions
+                const fileName = file.name.toLowerCase();
+                const highRiskExtensions = ['.exe', '.bat', '.ps1', '.vbs', '.scr', '.js', '.cmd', '.pif'];
+                const isHighRisk = highRiskExtensions.some(ext => fileName.endsWith(ext));
+
+                const statusBadge = isHighRisk 
+                    ? '<span style="color: #ff5555; font-weight: bold;">❌ FAIL (High-Risk Extension)</span>' 
+                    : '<span style="color: #55ff55; font-weight: bold;">✅ PASS (Low-Risk Format)</span>';
+
+                // 3. Render results with Status and VirusTotal link
+                resultsDiv.innerHTML = `
+                    <p>📂 <strong>File:</strong> ${escapeHtml(file.name)}</p>
+                    <p>🛡️ <strong>Local Status:</strong> ${statusBadge}</p>
+                    <p>🔍 <strong>SHA-256:</strong> <code>${fileHash}</code></p>
+                    <p><a href="https://www.virustotal.com/gui/file/${fileHash}" target="_blank" style="color: #55ff55;">🔗 Open this hash on VirusTotal &rarr;</a></p>
+                `;
+
+            } catch (error) {
+                console.error("Hash calculation failed:", error);
+                resultsDiv.innerHTML = `<p style="color: #ff5555;">⚠️ Error processing file attachment locally.</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
