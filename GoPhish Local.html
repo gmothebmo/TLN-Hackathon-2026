@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GoPhish Scanner & Attachment Sandbox</title>
+    <!-- This title will display in the browser tab -->
+    <title>GoPhish Scanner & Attachment tool</title> 
     <style>
+        /* This is the main stylesheet for the GoPhish Scanner & Attachment tool */
         body { font-family: Arial, sans-serif; margin: 40px; background: #1e1e1e; color: #fff; }
         .container { display: flex; gap: 20px; flex-wrap: wrap; }
         .panel { flex: 1; min-width: 400px; background: #252526; padding: 20px; border: 1px solid #333; border-radius: 6px; }
@@ -10,9 +12,9 @@
         button { padding: 10px 20px; background: #007acc; color: white; border: none; cursor: pointer; margin-top: 10px; }
         .results { margin-top: 15px; padding: 12px; background: #1e1e1e; border: 1px solid #444; min-height: 80px; font-family: monospace; font-size: 13px; }
         
-        /* Drag and Drop Zone Styling */
+        /*Drag and Drop Zone area - but users need to "clich here" first to drag files*/
         .drop-zone {
-            border: 2px dashed #007acc;
+            border: 2px dashed #3a3f42;
             padding: 30px;
             text-align: center;
             background: #2d2d2d;
@@ -20,55 +22,69 @@
             margin-top: 10px;
             border-radius: 4px;
         }
+        /* Fancy UI color scheme */
         .drop-zone:hover { background: #333; }
     </style>
 </head>
+<!-- This is the main body of the GoPhish Scanner & Attachment tool -->
 <body>
-    <h1>GoPhish Security Suite</h1>
+    <h1>GoPhish Security Scanner Tool</h1>
     <p>Local email heuristic analysis & isolated VirusTotal attachment verification.</p>
-    
+    <!-- This container holds both the email scanner and the attachment verifier panels -->
     <div class="container">
         <!-- PANEL 1: Email Text/Header Local Scanner -->
         <div class="panel">
+            <!-- This section allows users to paste raw email headers or upload .eml/.txt files for analysis -->
             <h2>📧 Email Text & Header Scanner</h2>
             <input type="file" id="emailFileInput" accept=".eml,.txt" onchange="handleFileUpload(event)" style="margin-bottom: 10px; display: block;" />
             <textarea id="emailInput" placeholder="Paste raw email headers/text here..."></textarea>
             <br>
+            <!-- Buttons for scanning, loading sample email, and clearing the form -->
             <button onclick="runScan()">Scan Email Text</button>
             <button onclick="loadSampleEmail()" style="background: #444; margin-left: 10px;">Load Sample</button>
             <button onclick="clearEmailForm()" style="background: #882222; margin-left: 10px;">Clear</button>
-            
+            <!-- This displays the results of the email scan -->
             <div id="emailResults" class="results">Results will appear here...</div>
         </div>
-
+        <!-- End of PANEL 1 -->
         <!-- PANEL 2: Dedicated VirusTotal Attachment Drop Zone -->
         <div class="panel">
-            <h2>📎 Attachment Sandbox (VirusTotal)</h2>
-            <p style="font-size: 13px; color: #aaa;">Drop any suspicious email attachment below to check its SHA-256 hash against VirusTotal.</p>
-            
+            <!-- This section allows users to drag and drop email attachments for SHA-256 hash calculation and VirusTotal lookup -->
+            <h2>📎📁Attachment Scanner (VirusTotal)</h2>
+            <!-- Instructions for users to drop files -->
+            <p style="font-size: 13px; color: #aaa;">Drop any suspicious email attachment below to check its SHA-256 hash against VirusTotal. False positives may occur.</p>
+            <!-- This is where users can drop files to utilize VirusTotal-->
+            <!-- Once user click to  browser files they can drag the file -->
             <div class="drop-zone" id="dropZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)" onclick="document.getElementById('fileInput').click()">
-                <p>Drag & Drop attachment here<br><strong>or click to browse files</strong></p>
+                <p>click here to browse files and select/darg a file for scanning</strong></p>
                 <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(event)" />
             </div>
-
+            <!-- This displays the results of the attachment scan -->
             <div id="attachmentResults" class="results" style="margin-top: 15px;">Attachment analysis results will appear here...</div>
         </div>
     </div>
-
+    <!-- End of PANEL 2 -->
     <script>
         // --- PANEL 1 LOGIC: Email Local Scanner ---
+        // This function handles the file upload for email text analysis
         function handleFileUpload(event) {
+            // Get the first file from the input
             const file = event.target.files[0];
+            // If no file is selected, exit the function
             if (!file) return;
 
+            // Create a new FileReader to read the file content
             const reader = new FileReader();
+            // When the file is loaded, set the textarea value and run the scan
             reader.onload = function(e) {
+                // Set the textarea value to the file content
                 document.getElementById('emailInput').value = e.target.result;
                 runScan();
             };
+            //
             reader.readAsText(file);
         }
-
+        // This function loads a sample email into the textarea for testing
         function loadSampleEmail() {
             const sampleText = `Received: from mail.suspicious-relay-77.ru (HELO mail)
 From: security-alert@microsoft-support-update.com
@@ -83,54 +99,101 @@ http://login.microsoft365-verify-secure-portal.com/auth/login`;
             document.getElementById('emailInput').value = sampleText;
             runScan();
         }
-
-        function escapeHtml(string) {
+        // This function escapes HTML characters to prevent XSS in the results display
+        function escapeHtml(string) {  
+            // Replace &, <, and > with their HTML entity equivalents
             return string.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
-
+        // This function clears the email input form and resets the results display
         function clearEmailForm() {
             document.getElementById('emailInput').value = '';
             document.getElementById('emailFileInput').value = '';
             document.getElementById('emailResults').innerHTML = 'Results will appear here...';
         }
-
-        function runScan() {
+        // This function checks if a domain exists by querying Google's DNS over HTTPS API - this is my star of my show, it checks if the domain is valid and exists in DNS records or not
+        async function checkDomainViaGoogleDNS(domainPart) {
+            // Use Google's DNS over HTTPS API to check if the domain resolves to any A records
+            try {
+                // Fetch the DNS resolution data for the given domain
+                const response = await fetch(`https://dns.google/resolve?name=${domainPart}&type=A`);
+                const data = await response.json();
+                // Status 0 means NOERROR (domain successfully resolved records)
+                if (data.Status === 0 && data.Answer && data.Answer.length > 0) {
+                    return { exists: true, records: data.Answer.length };
+                }
+                // If no records are found, return that the domain does not exist
+                return { exists: false, records: 0 };
+            } catch (error) {
+                console.error("DNS lookup failed:", error);
+                return { exists: null, error: true };
+            }
+        }
+        // This function runs the email scan and analyzes the content for suspicious indicators
+        async function runScan() {
             const text = document.getElementById('emailInput').value;
             const resultsDiv = document.getElementById('emailResults');
-            
+            // If the textarea is empty, prompt the user to input email text
             let warnings = [];
             let isSuspicious = false;
             let targetSender = "Unknown Sender";
-
+            // Check for forwarded email wrapper and extract inner sender if present, this helps to identify the actual sender in case of email forwarding
             const fwdHeaderIndex = text.indexOf("---------- Forwarded message ---------");
+            // If a forwarded message is detected, extract the inner "From" header
             if (fwdHeaderIndex !== -1) {
                 const fwdSection = text.substring(fwdHeaderIndex);
                 const innerFromMatch = fwdSection.match(/From:\s*([^\r\n]+)/i);
-                if (innerFromMatch) {
-                    targetSender = innerFromMatch[1].replace(/[\r\n]+/g, '').trim();
-                }
-                warnings.push("ℹ️ Forwarded email wrapper detected. Inspecting inner payload.");
-            } else {
-                const fromMatch = text.match(/From:\s*([^\r\n]+)/i);
-                targetSender = fromMatch ? fromMatch[1].replace(/[\r\n]+/g, '').trim() : "Unknown Sender";
+            // If an inner "From" header is found, clean it up and set it as the target sender
+            if (innerFromMatch) {
+                targetSender = innerFromMatch[1].replace(/[\r\n]+/g, '').trim();
             }
+        } else {
+            const fromMatch = text.match(/From:\s*([^\r\n]+)/i);
+            targetSender = fromMatch ? fromMatch[1].replace(/[\r\n]+/g, '').trim() : "Unknown Sender";
+}
 
+// Safety check: If targetSender accidentally swallowed multiple headers (contains internal field keys), isolate the email address
+if (targetSender.includes("Subject:") || targetSender.includes("Date:")) {
+    const extractedEmail = targetSender.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    if (extractedEmail) {
+        targetSender = extractedEmail[0];
+    }
+}
+            }
+            // Convert the email text to lowercase for case-insensitive keyword matching
             const lowerText = text.toLowerCase();
-            const highRiskKeywords = ['verify', 'account', 'suspend', 'expired', 'click here', 'login', 'update', 'security alert', 'action required', 'billing'];
-            
+            const highRiskKeywords = ['verify', 'account', 'suspend', 'expired', 'click here', 'login', 'update', 'security alert', 'action required', 'billing', "urgent", "password", "credentials", "confirm", "reset", "unauthorized", "suspicious"];
+            // Filter the high-risk keywords to find which ones are present in the email text
             let keywordHits = highRiskKeywords.filter(keyword => lowerText.includes(keyword));
+            // If two or more high-risk keywords are detected, mark the email as suspicious and add a warning
             if (keywordHits.length >= 2) {
                 isSuspicious = true;
+                // Add a warning indicating that high-risk trigger words were detected in the email text
                 warnings.push(`⚠️ High-risk trigger words detected: ${keywordHits.join(', ')}`);
             }
-
+            // Extract the domain part from the sender's email address for further analysis and comparison against a trusted domain whitelist
             const emailMatch = targetSender.match(/<([^>]+)>|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
             const cleanEmail = emailMatch ? (emailMatch[1] || emailMatch[2] || targetSender) : targetSender;
             const domainPart = cleanEmail.includes('@') ? cleanEmail.split('@')[1].toLowerCase().replace('>', '').trim() : '';
-
+            // If a domain part is extracted, check it against a list of trusted domains and look for high-entropy suspicious domains from untrusted sources
             if (domainPart) {
+                // Define a list of trusted domains for comparison, some are major email providers and corporate domains, while others are known to be used in phishing campaigns, but are included here for demonstration purposes
                 const trustedDomains = ['libertymutual.com', 'microsoft.com', 'google.com'];
+                // If the domain is not in the trusted list, check for high-entropy characteristics (e.g., long, random-looking strings) to flag potential phishing domains
                 if (!trustedDomains.includes(domainPart)) {
+                    // Live Google DNS lookup integration
+                    const dnsResult = await checkDomainViaGoogleDNS(domainPart);
+                    if (dnsResult.error) {
+                        // If the DNS lookup fails due to network or CORS issues, add a warning indicating the failure
+                        warnings.push(`⚠️ Live Google DNS lookup failed (Network/CORS issue).`);
+                    } else if (!dnsResult.exists) {
+                        // If the domain does not resolve via Google DNS, mark it as suspicious and add a warning
+                        isSuspicious = true;
+                        warnings.push(`🚨 NXDOMAIN: Domain '${domainPart}' does not resolve via Google DNS!`);  
+                    } else {
+                        // If the domain resolves successfully, add a warning indicating that the domain is verified and active
+                        warnings.push(`🌐 Google DNS verified active domain (${dnsResult.records} A record(s) found).`);
+                    }
+                    // Additional heuristic: If the domain part is unusually long and consists of random alphanumeric characters, flag it as suspicious
                     if (domainPart.length > 8 && /^[a-z0-9]+$/.test(domainPart.split('.')[0])) {
                         isSuspicious = true;
                         warnings.push(`🚨 Suspicious high-entropy domain detected: ${domainPart}`);
@@ -139,7 +202,7 @@ http://login.microsoft365-verify-secure-portal.com/auth/login`;
                     warnings.push(`✅ Trusted domain whitelist match: ${domainPart}`);
                 }
             }
-
+            // Render the results in the emailResults div, including the detected sender, initial assessment, and any warnings generated during the analysis
             resultsDiv.innerHTML = `
                 <p><strong>Detected Sender:</strong> ${escapeHtml(targetSender)}</p>
                 <p><strong>Initial Assessment:</strong> ${isSuspicious ? '<span style="color: #ff5555;">Suspicious</span>' : '<span style="color: #55ff55;">Likely Clean</span>'}</p>
@@ -172,7 +235,7 @@ http://login.microsoft365-verify-secure-portal.com/auth/login`;
                 processAttachment(event.target.files[0]);
             }
         }
-
+        // This function processes the dropped or selected file, calculates its SHA-256 hash, and checks for high-risk extensions
         async function processAttachment(file) {
             const resultsDiv = document.getElementById('attachmentResults');
             resultsDiv.innerHTML = `📂 Processing file: <strong>${escapeHtml(file.name)}</strong>...`;
@@ -190,7 +253,7 @@ http://login.microsoft365-verify-secure-portal.com/auth/login`;
                 const isHighRisk = highRiskExtensions.some(ext => fileName.endsWith(ext));
 
                 const statusBadge = isHighRisk 
-                    ? '<span style="color: #ff5555; font-weight: bold;">❌ FAIL (High-Risk Extension)</span>' 
+                    ? '<span style="color: #ff5555; font-weight: bold;">⚠️ High-Risk Extension (Review Required)</span>' 
                     : '<span style="color: #55ff55; font-weight: bold;">✅ PASS (Low-Risk Format)</span>';
 
                 // 3. Render results with Status and VirusTotal link
